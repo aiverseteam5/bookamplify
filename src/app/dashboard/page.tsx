@@ -1,105 +1,204 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 
-export default function Dashboard() {
+export default function DashboardOverview() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  const router = useRouter()
+  const [metrics, setMetrics] = useState({
+    followers: 0,
+    posts: 0,
+    engagement: 0,
+    revenue: 0
+  })
+  const [recentActivity, setRecentActivity] = useState<any[]>([])
 
   useEffect(() => {
     const getUser = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         setUser(user)
-      } else {
-        router.push('/auth/login')
+        await fetchMetrics()
+        await fetchRecentActivity()
       }
       setLoading(false)
     }
     getUser()
-  }, [router])
+  }, [])
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    router.push('/')
+  const fetchMetrics = async () => {
+    try {
+      // In Phase 6, these will be real API calls
+      // For now, showing placeholder data
+      setMetrics({
+        followers: 1247,
+        posts: 48,
+        engagement: 8.3,
+        revenue: 342
+      })
+    } catch (error) {
+      console.error('Failed to fetch metrics:', error)
+    }
+  }
+
+  const fetchRecentActivity = async () => {
+    try {
+      // In Phase 6, this will fetch from agent_runs table
+      const { data, error } = await supabase
+        .from('agent_runs')
+        .select('*')
+        .order('triggered_at', { ascending: false })
+        .limit(5)
+
+      if (error) {
+        console.error('Failed to fetch activity:', error)
+        return
+      }
+
+      setRecentActivity(data || [])
+    } catch (error) {
+      console.error('Failed to fetch recent activity:', error)
+    }
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p>Loading dashboard...</p>
-        </div>
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-6">
-            <h1 className="text-2xl font-bold text-gray-900">BookAmplify Dashboard</h1>
-            <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-600">Welcome, {user?.email}</span>
-              <button
-                onClick={handleSignOut}
-                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
-              >
-                Sign Out
-              </button>
+    <div className="p-6">
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-gray-900">Dashboard Overview</h1>
+        <p className="text-gray-600">Welcome back! Here's what's happening with your book marketing.</p>
+      </div>
+
+      {/* Metrics Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="bg-white p-6 rounded-lg shadow">
+          <div className="flex items-center">
+            <div className="flex-shrink-0">
+              <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                <span className="text-blue-600">👥</span>
+              </div>
+            </div>
+            <div className="ml-4">
+              <p className="text-sm font-medium text-gray-600">Total Followers</p>
+              <p className="text-2xl font-bold text-gray-900">{metrics.followers.toLocaleString()}</p>
             </div>
           </div>
         </div>
-      </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="text-center">
-          <h2 className="text-3xl font-bold text-gray-900 mb-4">
-            Welcome to Your Dashboard! 🎉
-          </h2>
-          <p className="text-lg text-gray-600 mb-8">
-            This is a placeholder dashboard. The full implementation will be built in Phase 5.
-          </p>
-
-          {/* Placeholder Content */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <div className="bg-white p-6 rounded-lg shadow">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">📊 Overview</h3>
-              <p className="text-gray-600">Metrics and analytics coming soon</p>
+        <div className="bg-white p-6 rounded-lg shadow">
+          <div className="flex items-center">
+            <div className="flex-shrink-0">
+              <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                <span className="text-green-600">📝</span>
+              </div>
             </div>
-            <div className="bg-white p-6 rounded-lg shadow">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">📝 Content Queue</h3>
-              <p className="text-gray-600">Content approval workflow coming soon</p>
+            <div className="ml-4">
+              <p className="text-sm font-medium text-gray-600">Posts Generated</p>
+              <p className="text-2xl font-bold text-gray-900">{metrics.posts}</p>
             </div>
-            <div className="bg-white p-6 rounded-lg shadow">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">🤖 Generate</h3>
-              <p className="text-gray-600">AI content generation coming soon</p>
-            </div>
-          </div>
-
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-            <h3 className="text-lg font-semibold text-blue-900 mb-2">Phase 3 Complete! ✅</h3>
-            <p className="text-blue-800 mb-4">
-              Authentication system is working. You've successfully:
-            </p>
-            <ul className="text-blue-800 text-left list-disc list-inside space-y-1">
-              <li>Created an account</li>
-              <li>Logged in securely</li>
-              <li>Reached the dashboard</li>
-            </ul>
-            <p className="text-blue-800 mt-4">
-              Ready for Phase 4: Onboarding wizard and manuscript upload!
-            </p>
           </div>
         </div>
-      </main>
+
+        <div className="bg-white p-6 rounded-lg shadow">
+          <div className="flex items-center">
+            <div className="flex-shrink-0">
+              <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
+                <span className="text-yellow-600">📊</span>
+              </div>
+            </div>
+            <div className="ml-4">
+              <p className="text-sm font-medium text-gray-600">Engagement Rate</p>
+              <p className="text-2xl font-bold text-gray-900">{metrics.engagement}%</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-lg shadow">
+          <div className="flex items-center">
+            <div className="flex-shrink-0">
+              <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
+                <span className="text-purple-600">💰</span>
+              </div>
+            </div>
+            <div className="ml-4">
+              <p className="text-sm font-medium text-gray-600">Revenue</p>
+              <p className="text-2xl font-bold text-gray-900">${metrics.revenue}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Recent Activity */}
+      <div className="bg-white shadow rounded-lg">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h2 className="text-lg font-medium text-gray-900">Recent Activity</h2>
+        </div>
+        <div className="divide-y divide-gray-200">
+          {recentActivity.length === 0 ? (
+            <div className="px-6 py-8 text-center text-gray-500">
+              <p>No recent activity yet.</p>
+              <p className="text-sm mt-2">Start by generating some content!</p>
+            </div>
+          ) : (
+            recentActivity.map((activity) => (
+              <div key={activity.id} className="px-6 py-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">
+                      {activity.agent_name === 'voiceExtraction' ? 'Voice Analysis' : 'Content Generation'}
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      {activity.status === 'completed' 
+                        ? `Completed ${activity.items_created} items`
+                        : activity.status === 'running'
+                        ? 'In progress...'
+                        : 'Failed'
+                      }
+                    </p>
+                  </div>
+                  <div className="text-sm text-gray-500">
+                    {new Date(activity.triggered_at).toLocaleDateString()}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Quick Actions */}
+      <div className="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
+        <h3 className="text-lg font-medium text-blue-900 mb-4">Quick Actions</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Link
+            href="/dashboard/generate"
+            className="block text-center px-4 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+          >
+            🤖 Generate Content
+          </Link>
+          <Link
+            href="/dashboard/queue"
+            className="block text-center px-4 py-3 bg-white text-blue-600 border border-blue-300 rounded-md hover:bg-blue-50"
+          >
+            📝 Review Queue
+          </Link>
+          <Link
+            href="/dashboard/connections"
+            className="block text-center px-4 py-3 bg-white text-blue-600 border border-blue-300 rounded-md hover:bg-blue-50"
+          >
+            🔗 Manage Connections
+          </Link>
+        </div>
+      </div>
     </div>
   )
 }
