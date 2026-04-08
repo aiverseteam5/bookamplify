@@ -1,230 +1,137 @@
-import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
+import { ContentGenerateSchema } from '@/lib/schemas'
 import { generateContent } from '@/lib/anthropic'
+import { createEmbedding } from '@/lib/openai'
 import { genreSkills } from '@/lib/genreSkills'
 
 export async function POST(request: NextRequest) {
+  const supabase = await createClient()
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (authError || !user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const body: unknown = await request.json()
+  const parsed = ContentGenerateSchema.safeParse(body)
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
+  }
+
+  const { platform, topic, tone, skills } = parsed.data
+
+  const { data: author, error: authorError } = await supabase
+    .from('authors')
+    .select('id, voice_profile, book_title, genre, tone_preference')
+    .eq('user_id', user.id)
+    .single()
+
+  if (authorError || !author) {
+    return NextResponse.json({ error: 'Author profile not found' }, { status: 404 })
+  }
+
+  // Check active subscription
+  const { data: subscription } = await supabase
+    .from('subscriptions')
+    .select('status, trial_ends_at')
+    .eq('author_id', author.id)
+    .single()
+
+  const isActive = subscription?.status === 'active' &&
+    (subscription.trial_ends_at === null || new Date(subscription.trial_ends_at) > new Date())
+
+  if (!subscription || !isActive) {
+    return NextResponse.json({ error: 'Active subscription required' }, { status: 403 })
+  }
+
+  // Log agent run
+  const { data: run } = await supabase
+    .from('agent_runs')
+    .insert({ author_id: author.id, agent_name: 'contentGeneration', status: 'running' })
+    .select()
+    .single()
+
   try {
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    )
-
-    // Get user from session
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // Semantic search for relevant book chunks (RAG)
+    let ragContext = ''
+    try {
+      const topicEmbedding = await createEmbedding(topic)
+      const { data: chunks } = await supabase.rpc('match_book_chunks', {
+        query_embedding: topicEmbedding,
+        match_count: 3,
+        author_id_filter: author.id,
+      })
+      if (chunks && Array.isArray(chunks)) {
+        ragContext = (chunks as { content: string }[]).map(c => c.content).join('\n\n')
+      }
+    } catch {
+      // RAG is best-effort — continue without it
     }
 
-    // Get author profile
-    const { data: author, error: authorError } = await supabase
-      .from('authors')
-      .select('*')
-      .eq('user_id', user.id)
-      .single()
+    const genreKey = (author.genre ?? 'fiction') as keyof typeof genreSkills
+    const genreSkillLayer = genreSkills[genreKey] ?? genreSkills.fiction
 
-    if (authorError || !author) {
-      return NextResponse.json({ error: 'Author profile not found' }, { status: 404 })
-    }
+    const prompt = `SYSTEM:
+You are an expert social media content creator for book authors.
+You deeply understand the author's genre, their readers' psychology, and what drives book sales through authentic social content.
 
-    const { platform, topic, contentType, tone } = await request.json()
+AUTHOR VOICE PROFILE:
+${author.voice_profile ? JSON.stringify(author.voice_profile, null, 2) : 'No voice profile yet — write in a professional, engaging tone.'}
 
-    if (!platform || !topic) {
-      return NextResponse.json({ 
-        error: 'Missing required parameters: platform, topic' 
-      }, { status: 400 })
-    }
+BOOK: ${author.book_title ?? 'Untitled'}
+GENRE: ${author.genre ?? 'General'}
+TONE PREFERENCE: ${author.tone_preference}
+${ragContext ? `RELEVANT BOOK EXCERPTS:\n${ragContext}` : ''}
 
-    // Log agent run start
-    const { data: run, error: runError } = await supabase
-      .from('agent_runs')
+GENRE-SPECIFIC INSTRUCTION:
+${genreSkillLayer}
+
+USER:
+Create a ${platform} post about the following topic:
+${topic}
+
+Tone: ${tone}
+${skills.length > 0 ? `Apply these skills: ${skills.join(', ')}` : ''}
+
+Format it perfectly for ${platform} including appropriate length${platform === 'instagram' || platform === 'twitter' ? ', hashtags' : ''}.
+Return only the final post content — no meta-commentary.`
+
+    const contentText = await generateContent(prompt)
+
+    const { data: contentItem, error: insertError } = await supabase
+      .from('content_items')
       .insert({
         author_id: author.id,
-        agent_name: 'contentGeneration',
-        status: 'running',
+        platform,
+        content_text: contentText,
+        status: 'draft',
+        created_by_agent: 'contentGeneration',
       })
       .select()
       .single()
 
-    if (runError) {
-      console.error('Failed to log agent run:', runError)
+    if (insertError || !contentItem) {
+      throw new Error(insertError?.message ?? 'Failed to save content item')
     }
 
-    try {
-      // Get genre-specific skills
-      const skills = genreSkills[author.genre as keyof typeof genreSkills] || genreSkills.fiction
-
-      // Build the layered prompt
-      const voiceProfile = author.voice_profile
-      const prompt = buildLayeredPrompt({
-        voiceProfile,
-        topic,
-        platform,
-        contentType,
-        tone: tone || author.tone_preference,
-        bookTitle: author.book_title,
-        bookDescription: author.book_description,
-        targetReader: author.target_reader,
-        skills: skills.split('\n'),
-        author
-      })
-
-      // Generate content using Claude
-      const response = await generateContent(prompt)
-      
-      // Parse the response to extract content items
-      const contentItems = parseContentResponse(response, platform, contentType)
-
-      // Save content items to database
-      const savedItems = []
-      for (const item of contentItems) {
-        const { data, error } = await supabase
-          .from('content_items')
-          .insert({
-            author_id: author.id,
-            platform,
-            content_type: contentType,
-            content: item.content,
-            status: 'pending',
-            voice_profile_used: voiceProfile,
-            topic,
-            generated_at: new Date().toISOString()
-          })
-          .select()
-          .single()
-
-        if (error) {
-          console.error('Failed to save content item:', error)
-        } else {
-          savedItems.push(data)
-        }
-      }
-
-      // Update agent run as completed
-      if (run) {
-        await supabase
-          .from('agent_runs')
-          .update({
-            status: 'completed',
-            completed_at: new Date().toISOString(),
-            output_summary: `Generated ${savedItems.length} content items for ${platform}`,
-            items_created: savedItems.length,
-          } as any)
-          .eq('id', run.id)
-      }
-
-      return NextResponse.json({
-        status: 'success',
-        items: savedItems,
-        message: `Generated ${savedItems.length} content items for ${platform}`
-      })
-
-    } catch (generationError) {
-      console.error('Content generation error:', generationError)
-      
-      // Update agent run as failed
-      if (run) {
-        await supabase
-          .from('agent_runs')
-          .update({
-            status: 'failed',
-            completed_at: new Date().toISOString(),
-            output_summary: generationError instanceof Error ? generationError.message : 'Unknown error',
-          } as any)
-          .eq('id', run.id)
-      }
-
-      throw generationError
+    if (run) {
+      await supabase
+        .from('agent_runs')
+        .update({ status: 'completed', completed_at: new Date().toISOString(), items_created: 1 })
+        .eq('id', run.id)
     }
 
-  } catch (error: any) {
-    console.error('Content generation API error:', error)
-    return NextResponse.json(
-      { error: error.message || 'Content generation failed' },
-      { status: 500 }
-    )
-  }
-}
-
-function buildLayeredPrompt(params: {
-  voiceProfile: any
-  topic: string
-  platform: string
-  contentType: string
-  tone: string
-  bookTitle: string
-  bookDescription: string
-  targetReader: string
-  skills: string[]
-  author: any
-}): string {
-  const {
-    voiceProfile,
-    topic,
-    platform,
-    contentType,
-    tone,
-    bookTitle,
-    bookDescription,
-    targetReader,
-    skills,
-    author
-  } = params
-
-  return `You are a content creation AI for authors, generating social media content that sounds exactly like the author.
-
-BOOK CONTEXT:
-Title: ${bookTitle}
-Description: ${bookDescription}
-Target Reader: ${targetReader}
-Genre: ${author.genre || 'Unknown'}
-
-AUTHOR VOICE PROFILE:
-Tone Descriptors: ${voiceProfile?.tone_descriptors?.join(', ') || 'professional, engaging'}
-Vocabulary Level: ${voiceProfile?.vocabulary_level || 'mixed'}
-Sentence Rhythm: ${voiceProfile?.sentence_rhythm || 'varied'}
-Characteristic Phrases: ${voiceProfile?.characteristic_phrases?.join(', ') || 'none specified'}
-Avoids: ${voiceProfile?.avoids?.join(', ') || 'none specified'}
-Example Voice: "${voiceProfile?.example_voice_sentence || 'Write in a professional yet approachable tone'}"
-
-CONTENT REQUIREMENTS:
-Platform: ${platform}
-Topic: ${topic}
-Content Type: ${contentType}
-Desired Tone: ${tone}
-
-GENRE-SPECIFIC SKILLS:
-${skills.join('\n')}
-
-INSTRUCTIONS:
-1. Write 3-5 content variations that sound exactly like this author
-2. Each variation should be platform-appropriate (${platform})
-3. Content should relate to the topic: ${topic}
-4. Use the author's voice profile and genre-specific skills
-5. Include relevant hashtags if appropriate for the platform
-6. Format each variation as "VARIATION X: [content]"
-
-Return only the content variations, no explanations.`
-}
-
-function parseContentResponse(response: string, platform: string, contentType: string): Array<{content: string}> {
-  const lines = response.split('\n')
-  const items = []
-  
-  for (const line of lines) {
-    const trimmed = line.trim()
-    if (trimmed.startsWith('VARIATION') && trimmed.includes(':')) {
-      const content = trimmed.split(':')[1].trim()
-      if (content) {
-        items.push({ content })
-      }
+    return NextResponse.json({ id: contentItem.id, content_text: contentText, platform, status: 'draft' })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Content generation failed'
+    if (run) {
+      await supabase
+        .from('agent_runs')
+        .update({ status: 'failed', completed_at: new Date().toISOString(), output_summary: message })
+        .eq('id', run.id)
     }
+    console.error('Content generation error:', err)
+    return NextResponse.json({ error: message }, { status: 500 })
   }
-  
-  // If no variations found, treat the whole response as one item
-  if (items.length === 0 && response.trim()) {
-    items.push({ content: response.trim() })
-  }
-  
-  return items
 }
