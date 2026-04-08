@@ -33,7 +33,7 @@ export default function AuthError() {
             <h3 className="text-sm font-medium text-blue-800">Troubleshooting tips:</h3>
             <ul className="mt-2 text-sm text-blue-700 list-disc list-inside space-y-1">
               <li>Check your email and password are correct</li>
-              <li>Make sure you've verified your email address</li>
+              <li>Make sure you&apos;ve verified your email address</li>
               <li>Try clearing your browser cookies</li>
               <li>Contact support if the problem persists</li>
             </ul>
