@@ -94,8 +94,8 @@ create policy "agent_runs: owner only" on agent_runs
 create table subscriptions (
   id uuid primary key default uuid_generate_v4(),
   author_id uuid references authors(id) on delete cascade not null unique,
-  stripe_customer_id text,
-  stripe_subscription_id text,
+  razorpay_customer_id text,
+  razorpay_subscription_id text,
   plan text default 'trial' check (plan in ('trial','solo','pro','agency')),
   status text default 'active',
   trial_ends_at timestamptz default (now() + interval '14 days'),
