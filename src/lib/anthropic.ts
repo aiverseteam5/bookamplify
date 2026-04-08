@@ -1,31 +1,28 @@
 import Anthropic from '@anthropic-ai/sdk'
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-})
+let _client: Anthropic | null = null
 
-export const generateContent = async (prompt: string) => {
-  try {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 2000,
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-    })
-
-    const content = response.content[0]
-    if (content.type === 'text') {
-      return content.text
+function getClient(): Anthropic {
+  if (!_client) {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      throw new Error('ANTHROPIC_API_KEY environment variable is missing')
     }
-    throw new Error('Unexpected response format')
-  } catch (error) {
-    console.error('Error generating content:', error)
-    throw error
+    _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
   }
+  return _client
 }
 
-export { anthropic }
+export const generateContent = async (prompt: string): Promise<string> => {
+  const response = await getClient().messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 2000,
+    messages: [{ role: 'user', content: prompt }],
+  })
+
+  const block = response.content[0]
+  if (!block) throw new Error('No content returned from Claude')
+  if (block.type !== 'text') throw new Error('Unexpected response type from Claude')
+  return block.text
+}
+
+export { getClient as anthropic }
