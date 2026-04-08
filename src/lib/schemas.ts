@@ -4,7 +4,10 @@ export const AuthorProfileSchema = z.object({
   name: z.string().min(1).max(200),
   book_title: z.string().min(1).max(300).optional(),
   book_description: z.string().max(2000).optional(),
-  genre: z.enum(["fiction", "history", "self-help", "business", "children", "cookbook", "poetry", "academic", "other"]).optional(),
+  genre: z.enum([
+    "fiction", "history", "self-help", "business",
+    "children", "cookbook", "poetry", "academic", "other",
+  ]).optional(),
   sub_genre: z.string().max(100).optional(),
   target_reader: z.string().max(500).optional(),
   purchase_url: z.string().url().optional().or(z.literal("")),
@@ -26,7 +29,7 @@ export const ContentGenerateSchema = z.object({
     "conversational",
     "academic",
     "storytelling",
-  ]),
+  ]).optional().default("conversational"),
   skills: z.array(z.string()).max(10).default([]),
 });
 
