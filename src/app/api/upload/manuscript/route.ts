@@ -49,15 +49,18 @@ export async function POST(request: NextRequest) {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
   fetch(`${appUrl}/api/agents/voice-extraction`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ authorId: author.id, fileName }),
+    headers: {
+      'Content-Type': 'application/json',
+      'x-internal-secret': process.env.INTERNAL_API_SECRET ?? '',
+    },
+    body: JSON.stringify({ authorId: author.id, filePath: fileName }),
   }).catch((err: unknown) => {
     console.error('Voice extraction trigger failed:', err)
   })
 
   return NextResponse.json({
     status: 'processing',
-    fileName,
+    filePath: fileName,
     message: 'Manuscript uploaded. Voice analysis in progress.',
   })
 }
