@@ -1,7 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  serverExternalPackages: ["@anthropic-ai/sdk", "openai"],
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "11mb",
+    },
+  },
 };
 
 export default nextConfig;
